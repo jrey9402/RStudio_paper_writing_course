@@ -1,0 +1,92 @@
+#Let's integrate the previous steps for \(\Delta\Delta C_t\) analysis with the plotting and statistical testing. Here is the complete R script that includes reading the data, calculating \(\Delta\Delta C_t\), fold change, summarizing the results, performing statistical tests, and creating a bar plot with statistical annotations.
+
+```r
+# Install and load necessary packages
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  install.packages("ggplot2")
+}
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+  install.packages("dplyr")
+}
+if (!requireNamespace("ggpubr", quietly = TRUE)) {
+  install.packages("ggpubr")
+}
+
+library(ggplot2)
+library(dplyr)
+library(ggpubr)
+
+# Read the data from a CSV file
+data <- read.csv("qrt_pcr_data.csv")
+
+# Assuming your data frame has columns: Sample, Gene, Cq
+# Separate data for each gene
+refgene_data <- data %>% filter(Gene == "RefGene")
+
+# Calculate delta Ct (dCt) for each gene
+data <- data %>%
+  group_by(Sample, Gene) %>%
+  mutate(dCt = Cq - refgene_data$Cq[match(Sample, refgene_data$Sample)]) %>%
+  ungroup()
+
+# Calculate delta delta Ct (ddCt)
+control_sample <- "Control"  # Replace with your control sample identifier
+control_dCt <- data %>% filter(Sample == control_sample) %>% select(Gene, dCt)
+data <- data %>%
+  left_join(control_dCt, by = "Gene", suffix = c("", "_control")) %>%
+  mutate(ddCt = dCt - dCt_control)
+
+# Calculate fold change
+data <- data %>%
+  mutate(FoldChange = 2^(-ddCt))
+
+# Summarize data for plotting
+summary_data <- data %>%
+  group_by(Gene) %>%
+  summarise(
+    mean_FoldChange = mean(FoldChange),
+    se_FoldChange = sd(FoldChange) / sqrt(n())
+  ) %>%
+  filter(Gene != "RefGene")  # Exclude reference gene from plot
+
+# Perform t-test to compare to control
+control_FC <- data %>% filter(Sample == control_sample) %>% pull(FoldChange)
+stat_results <- data %>%
+  filter(Gene != "RefGene") %>%
+  group_by(Gene) %>%
+  summarise(p_value = t.test(FoldChange, control_FC)$p.value)
+
+# Merge summary data with p-values
+summary_data <- summary_data %>%
+  left_join(stat_results, by = "Gene")
+
+# Create bar plot
+ggplot(summary_data, aes(x = Gene, y = mean_FoldChange)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_errorbar(aes(ymin = mean_FoldChange - se_FoldChange, ymax = mean_FoldChange + se_FoldChange), width = 0.2) +
+  geom_text(aes(label = ifelse(p_value < 0.05, "*", "")), vjust = -0.5, size = 5) +
+  labs(
+    title = "Fold Change in Gene Expression",
+    x = "Gene",
+    y = "Fold Change (2^-ΔΔCt)"
+  ) +
+  theme_minimal()
+```
+
+### Explanation:
+  
+#1. **Reading the data**: The script reads the qRT-PCR data from a CSV file.
+
+#2. **Calculating \(\Delta C_t\)**: The \(\Delta C_t\) values are calculated by subtracting the Cq values of the reference gene from the Cq values of the target genes.
+
+#3. **Calculating \(\Delta\Delta C_t\)**: The \(\Delta C_t\) values of the control sample are subtracted from the \(\Delta C_t\) values of each sample.
+
+#4. **Calculating fold change**: Fold change is calculated using the formula \(2^{-\Delta\Delta C_t}\).
+
+#5. **Summarizing the data**: The mean and standard error of the fold change are calculated for each gene.
+
+#6. **Statistical testing**: A t-test is performed to compare the fold change of each gene to the control sample, and p-values are calculated.
+
+#7. **Plotting the data**: A bar plot is created using `ggplot2`, with error bars representing the standard error. Statistical significance is annotated on the plot with asterisks for p-values less than 0.05.
+
+#Replace `"qrt_pcr_data.csv"` with the path to your actual CSV file and ensure your column names (`Sample`, `Gene`, `Cq`) match those in the script. The control sample identifier should also be updated accordingly. This script will generate a bar plot showing the fold change in gene expression with statistical annotations.

@@ -1,0 +1,43 @@
+# Load necessary libraries
+library(tidyverse)
+library(ggplot2)
+library(broom)  # For tidy statistical output
+
+# Sample data
+cq_values <- tibble(
+  sample = rep(1:6, each = 3),
+  genotype = rep(c("WT", "KO"), each = 9),
+  gene = rep(c("Gene1", "Gene2", "Reference"), 6),
+  cq = c(23, 25, 20, 24, 26, 21, 22, 24, 19, 23, 25, 20, 24, 26, 21, 22, 24, 19)
+)
+
+# Calculate delta Cq (ΔCq) for each gene compared to the reference gene
+cq_values <- cq_values %>%
+  group_by(sample, genotype) %>%
+  mutate(delta_cq = cq - cq[gene == "Reference"])
+
+# Calculate delta delta Cq (ΔΔCq) for each gene
+# Here, we assume WT as the control
+reference_cq <- cq_values %>%
+  filter(genotype == "WT") %>%
+  group_by(gene) %>%
+  summarise(reference_mean_delta_cq = mean(delta_cq))
+
+cq_values <- cq_values %>%
+  left_join(reference_cq, by = "gene") %>%
+  mutate(delta_delta_cq = delta_cq - reference_mean_delta_cq)
+
+# Perform statistical tests (e.g., t-test) to check differences between genotypes
+stat_tests <- cq_values %>%
+  filter(gene != "Reference") %>%
+  group_by(gene) %>%
+  do(tidy(t.test(delta_delta_cq ~ genotype, data = .)))
+
+# Plotting
+ggplot(cq_values %>% filter(gene != "Reference"), aes(x = gene, y = delta_delta_cq, fill = genotype)) +
+  geom_bar(stat = "summary", fun = "mean", position = position_dodge()) +
+  geom_errorbar(stat = "summary", fun.data = mean_se, position = position_dodge(.9), width = 0.25) +
+  labs(title = "Differential Expression of Genes", x = "Gene", y = "ΔΔCq") +
+  theme_minimal() +
+  theme(legend.title = element_blank()) +
+  geom_text(data = stat_tests, aes(x = gene, y = max(delta_delta_cq) + 0.5, label = paste("p =", round(p.value, 3))), position = position_dodge(width = 0.9))
